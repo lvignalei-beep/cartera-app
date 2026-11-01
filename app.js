@@ -1,12 +1,11 @@
 "use strict";
-/* Mi cartera — PWA. Lee data/cartera.json del repo privado cartera-datos con un token de solo
-   lectura guardado en este dispositivo. Guarda la última copia para funcionar sin conexión. */
+/* Mi cartera — PWA. Lee datos.enc (cifrado) y lo abre con la clave de ingreso del usuario.
+   Guarda la última copia para funcionar sin conexión. */
 
 const LS = {
   get(k, d = null) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* sin storage: sigue en memoria */ } },
 };
-const cfg = () => ({ token: LS.get("token", ""), repo: LS.get("repo", "lvignalei-beep/cartera-datos") });
 
 const st = { data: null, origen: null, error: null, tab: "hoy", periodo: "dia", aporte: LS.get("aporte", 0), agrupar: LS.get("agrupar", "funcion") };
 
@@ -31,17 +30,40 @@ function cuando(iso) {
 }
 const diasDesde = (iso) => iso ? Math.round((Date.now() - Date.parse(iso.slice(0, 10) + "T12:00:00-03:00")) / 864e5) : null;
 
-// ---------- datos ----------
+// ---------- datos (cifrados con la clave de ingreso) ----------
+const b64d = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const b64e = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const TE = new TextEncoder();
+function normalizarClave(c) {
+  const s = c.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return s.length === 16 ? s.match(/.{4}/g).join("-") : c.trim().toUpperCase();
+}
+async function derivarClave(clave) {
+  const l = await (await fetch("llave.json", { cache: "no-store" })).json();
+  const base = await crypto.subtle.importKey("raw", TE.encode(normalizarClave(clave)), "PBKDF2", false, ["deriveKey"]);
+  const kek = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b64d(l.salt), iterations: l.iter, hash: "SHA-256" },
+    base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  try {
+    return b64e(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64d(l.iv), additionalData: TE.encode("llave-v1") }, kek, b64d(l.wk)));
+  } catch { throw new Error("La clave no es correcta."); }
+}
+async function descifrar(kb64) {
+  const e = await (await fetch("datos.enc", { cache: "no-store" })).json();
+  const k = await crypto.subtle.importKey("raw", b64d(kb64), "AES-GCM", false, ["decrypt"]);
+  let gz;
+  try { gz = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64d(e.iv), additionalData: TE.encode("cartera-v1") }, k, b64d(e.ct)); }
+  catch { throw new Error("No pude abrir los datos con la clave guardada. Volvé a cargarla en Ajustes."); }
+  const txt = await new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
+  return JSON.parse(txt);
+}
+
 async function cargar() {
-  const { token, repo } = cfg();
+  const kd = LS.get("kd", "");
   const cache = LS.get("cartera_cache");
   if (cache && !st.data) { st.data = cache.data; st.origen = { tipo: "cache", cuando: cache.guardado }; render(); }
-  if (!token) { st.error = "falta_token"; if (!cache) st.tab = "ajustes"; render(); return; }
+  if (!kd) { st.error = "falta_clave"; if (!cache) st.tab = "ajustes"; render(); return; }
   try {
-    const r = await fetch(`https://api.github.com/repos/${repo}/contents/data/cartera.json`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github.raw+json" }, cache: "no-store" });
-    if (!r.ok) throw new Error(r.status === 401 ? "El token no es válido o venció." : r.status === 404 ? "No encuentro el repo o el token no tiene acceso a él." : `GitHub respondió ${r.status}.`);
-    const data = await r.json();
+    const data = await descifrar(kd);
     st.data = data; st.error = null; st.origen = { tipo: "red", cuando: new Date().toISOString() };
     LS.set("cartera_cache", { data, guardado: st.origen.cuando });
   } catch (e) {
@@ -189,18 +211,18 @@ function vistaHoy() {
 function renderEstado() {
   const el = document.getElementById("estado");
   const d = st.data;
-  if (!d) { el.innerHTML = st.error ? `<span class="dot viejo">${esc(st.error === "falta_token" ? "Configurá el acceso en Ajustes" : st.error)}</span>` : "Cargando…"; return; }
+  if (!d) { el.innerHTML = st.error ? `<span class="dot viejo">${esc(st.error === "falta_clave" ? "Cargá tu clave en Ajustes" : st.error)}</span>` : "Cargando…"; return; }
   const viejo = diasDesde(d.corrida.fecha) > 3;
   const ultBol = d.brokers?.balanz?.ultimo_boleto;
   el.innerHTML = `
     <span class="dot ${viejo ? "viejo" : "ok"}">Datos ${esc(cuando(d.corrida.fecha))}${viejo ? " · sin actualizar hace " + diasDesde(d.corrida.fecha) + " días" : ""}</span>
     <span>Balanz: ${ultBol ? "último boleto " + fechaCorta(ultBol) : "por historial"}</span>
-    ${st.error && st.error !== "falta_token" ? `<span class="neg">${esc(st.error)}</span>` : ""}`;
+    ${st.error && st.error !== "falta_clave" ? `<span class="neg">${esc(st.error)}</span>` : ""}`;
 }
 
 function vistaCartera() {
   const d = st.data;
-  if (!d) return `<div class="vacio">${st.error === "falta_token" ? "Cargá el token en <b>Ajustes</b> para ver tu cartera." : "Cargando…"}</div>`;
+  if (!d) return `<div class="vacio">${st.error === "falta_clave" ? "Cargá tu clave de ingreso en <b>Ajustes</b> para ver tu cartera." : "Cargando…"}</div>`;
   const T = d.totales;
   const sinValor = T.posiciones_sin_valor || [];
   const alertas = (d.alertas || []).filter((a) => !a.startsWith("Mercado:"));
@@ -273,31 +295,21 @@ function vistaCartera() {
 const proximamente = (n, t) => `<div class="card vacio"><b>${t}</b><br>Llega en la etapa ${n}.</div>`;
 
 function vistaAjustes() {
-  const { token, repo } = cfg();
+  const tiene = !!LS.get("kd", "");
   return `
   <section class="card">
-    <h2 style="margin-top:0;font-size:17px">Acceso a tus datos</h2>
-    <p class="nota">La app lee <code>data/cartera.json</code> de tu repo privado con un token de GitHub de <b>solo lectura</b>. El token queda guardado solo en este dispositivo. No es tu clave de Balanz ni de ningún banco.</p>
-    <label for="in-token">Token de GitHub</label>
-    <input id="in-token" type="password" autocomplete="off" placeholder="github_pat_…" value="${esc(token)}">
-    <label for="in-repo">Repositorio</label>
-    <input id="in-repo" value="${esc(repo)}">
+    <h2 class="h">Clave de ingreso</h2>
+    <p class="nota">Tus datos se publican cifrados. Con tu clave la app los abre en este dispositivo. La clave no viaja a ningún lado: se usa acá para descifrar y queda guardada en este celular.</p>
+    ${tiene ? '<p class="pos">✓ Este dispositivo ya tiene la clave cargada.</p>' : ""}
+    <label for="in-clave">Clave (formato XXXX-XXXX-XXXX-XXXX)</label>
+    <input id="in-clave" type="password" autocomplete="current-password" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX">
     <div class="row" style="margin-top:12px">
-      ${token ? '<button id="btn-borrar" class="ghost">Borrar token</button>' : ""}
-      <button id="btn-guardar">Guardar y probar</button>
+      ${tiene ? '<button id="btn-borrar" class="ghost">Olvidar la clave en este dispositivo</button>' : ""}
+      <button id="btn-guardar">Entrar</button>
     </div>
     <p id="msg-ajustes" class="nota"></p>
   </section>
-  <section class="card">
-    <b>Cómo crear el token (una sola vez)</b>
-    <ol class="nota" style="padding-left:18px">
-      <li>En github.com: tu foto → <i>Settings</i> → <i>Developer settings</i> → <i>Personal access tokens</i> → <i>Fine-grained tokens</i> → <i>Generate new token</i>.</li>
-      <li>Nombre: "app cartera". Vencimiento: 1 año.</li>
-      <li><i>Repository access</i>: <b>Only select repositories</b> → <b>cartera-datos</b>.</li>
-      <li><i>Permissions</i> → <i>Repository permissions</i> → <b>Contents: Read-only</b>. Nada más.</li>
-      <li>Generalo, copialo y pegalo arriba.</li>
-    </ol>
-  </section>`;
+  <section class="card"><b>Si perdés la clave</b><p class="nota">Pedile a Claude una nueva: genera otra y la anterior deja de funcionar.</p></section>`;
 }
 
 function render() {
@@ -319,13 +331,16 @@ document.addEventListener("click", async (e) => {
   else if (b.dataset.periodo) { st.periodo = b.dataset.periodo; render(); }
   else if (b.dataset.agrupar) { st.agrupar = b.dataset.agrupar; LS.set("agrupar", st.agrupar); render(); }
   else if (b.id === "btn-guardar") {
-    LS.set("token", document.getElementById("in-token").value.trim());
-    LS.set("repo", document.getElementById("in-repo").value.trim() || "lvignalei-beep/cartera-datos");
-    document.getElementById("msg-ajustes").textContent = "Probando…";
-    st.error = null; await cargar();
-    if (st.tab === "ajustes") document.getElementById("msg-ajustes").textContent = st.error ? "No funcionó: " + st.error : "Listo, los datos cargaron.";
+    const msg = document.getElementById("msg-ajustes");
+    msg.textContent = "Verificando…";
+    try {
+      LS.set("kd", await derivarClave(document.getElementById("in-clave").value));
+      st.error = null; await cargar();
+      if (!st.error) { st.tab = "hoy"; render(); }
+      else msg.textContent = st.error;
+    } catch (err) { msg.textContent = String(err.message || err); }
   }
-  else if (b.id === "btn-borrar") { LS.set("token", ""); render(); }
+  else if (b.id === "btn-borrar") { LS.set("kd", ""); localStorage.removeItem("cartera_cache"); st.data = null; render(); }
   else if (b.id === "btn-actualizar") {
     const d = st.data;
     document.getElementById("dlg-ultima").innerHTML = d
