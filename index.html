@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mi cartera</title>
+<meta name="theme-color" content="#0f766e" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-row">
+    <h1>Mi cartera</h1>
+    <button id="btn-actualizar" class="ghost" aria-label="Estado de la actualización">↻</button>
+  </div>
+  <div id="estado" class="estado" role="status"></div>
+</header>
+
+<main id="vista"></main>
+
+<nav class="tabs" aria-label="Secciones">
+  <button data-tab="cartera" class="on"><span>◎</span>Cartera</button>
+  <button data-tab="grafico"><span>⟋</span>Gráfico</button>
+  <button data-tab="falta"><span>%</span>Qué falta</button>
+  <button data-tab="radar"><span>◉</span>Radar</button>
+  <button data-tab="ajustes"><span>⚙</span>Ajustes</button>
+</nav>
+
+<dialog id="dlg-actualizar">
+  <h2>Actualización</h2>
+  <p>La app no se conecta a Balanz. Los datos los arma un proceso automático todos los días hábiles:</p>
+  <ol>
+    <li><b>18:37</b>: Claude lee en tu Gmail el "Resumen de boletos" de Balanz y registra las operaciones nuevas.</li>
+    <li><b>18:50</b>: GitHub baja los precios de mercado (BYMA vía data912, FCI vía CAFCI, dólar MEP) y recalcula todo.</li>
+  </ol>
+  <div id="dlg-ultima" class="card"></div>
+  <div class="row">
+    <button id="btn-recargar">Recargar datos</button>
+    <button id="btn-cerrar" class="ghost">Cerrar</button>
+  </div>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
