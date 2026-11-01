@@ -66,6 +66,48 @@ function reparto(pesos, objetivo, aporte) {
   return Object.fromEntries(fs.map((f) => [f, aporte * falta[f] / sf]));
 }
 
+function vistaFalta() {
+  const d = st.data;
+  if (!d) return vistaCartera();
+  const nombres = d.funciones || {};
+  const umbral = 10;
+  const pesos = {};
+  d.posiciones.forEach((p) => { if (p.v_actual != null) pesos[p.funcion] = (pesos[p.funcion] || 0) + p.v_actual; });
+  const total = Object.values(pesos).reduce((a, b) => a + b, 0);
+  const sumaObj = Object.values(d.objetivo).reduce((a, b) => a + b, 0);
+  const rep = reparto(pesos, d.objetivo, st.aporte || 0);
+  const filas = Object.keys(d.objetivo).map((f) => {
+    const tengo = pesos[f] || 0, tp = total ? tengo / total * 100 : 0, obj = d.objetivo[f];
+    return { f, tengo, tp, obj, dif: tp - obj, fs: total * obj / 100 - tengo, ap: rep[f] || 0 };
+  }).sort((a, b) => a.dif - b.dif);
+  const escala = Math.max(...filas.map((x) => Math.max(x.tp, x.obj)), 1);
+
+  const fila = (x) => {
+    const sobra = x.dif > 0, vender = x.dif > umbral;
+    const cands = d.candidatos_aporte?.[x.f] || [];
+    return `<div class="fx">
+      <div class="fx-h"><b>${esc(nombres[x.f] || x.f)}</b>
+        <span class="num ${Math.abs(x.dif) < 2 ? "mut" : sobra ? "neg" : "pos"}">${x.dif > 0 ? "+" : ""}${nf(1).format(x.dif)} pp</span></div>
+      <div class="fx-bar" aria-hidden="true"><i style="width:${x.tp / escala * 100}%"></i><b style="left:${x.obj / escala * 100}%"></b></div>
+      <div class="fx-n nota num">Tenés ${pct(x.tp, 1, false)} (${arsM(x.tengo)}) · objetivo ${x.obj}% ·
+        ${x.fs >= 0 ? `<span class="pos">falta ${arsM(x.fs)}</span>` : `<span class="neg">sobra ${arsM(-x.fs)}</span>`}</div>
+      ${x.ap > 0 ? `<div class="fx-a">Del aporte: <b class="num">${ars(x.ap)}</b>${cands.length ? " → " + cands.slice(0, 3).map((c) => `${esc(c.ticker)}${c.senal !== "neutral" ? " (" + esc(SENAL[c.senal]) + ")" : ""}`).join(", ") : " → no tenés instrumentos de esta función: hay que elegir uno"}</div>` : ""}
+      ${vender ? `<div class="fx-v">Supera el objetivo por más de ${umbral} puntos: evaluar una venta parcial de ~${arsM(-x.fs)} o, más simple, dejar de aportarle hasta que el resto crezca.</div>` : ""}
+    </div>`;
+  };
+
+  return `
+  <section class="card">
+    <h2 class="h">Tu cartera contra el objetivo</h2>
+    <p class="nota">Barra = lo que tenés · marca = objetivo. Ordenado de lo que más falta a lo que más sobra. Sin liquidez: tu reserva está en la caja de ahorro.</p>
+    ${sumaObj !== 100 ? `<p class="fx-v">Tu objetivo suma ${sumaObj}%, no 100%: los "falta/sobra" no cierran a cero. Definí a qué función van los ${100 - sumaObj} puntos que faltan (archivo config/objetivo.json, o pedímelo).</p>` : ""}
+    <label for="in-aporte">Próximo aporte en pesos</label>
+    <input id="in-aporte" inputmode="numeric" placeholder="4.000.000" value="${st.aporte ? nf(0).format(st.aporte) : ""}">
+    ${filas.map(fila).join("")}
+    <p class="nota">Cálculo: falta/sobra = total × objetivo − lo que tenés. Aporte: a cada función le toca aporte × (lo que le falta después de sumar el aporte) ÷ (suma de faltantes); lo que sobra no recibe nada. Total considerado: ${ars(total)}${(d.totales.posiciones_sin_valor || []).length ? " (sin " + d.totales.posiciones_sin_valor.map(esc).join(", ") + ")" : ""}.</p>
+  </section>`;
+}
+
 function vistaHoy() {
   const d = st.data;
   if (!d) return vistaCartera();
@@ -264,7 +306,7 @@ function render() {
   v.innerHTML = st.tab === "hoy" ? vistaHoy()
     : st.tab === "cartera" ? vistaCartera()
     : st.tab === "grafico" ? proximamente(3, "Gráfico por instrumento")
-    : st.tab === "falta" ? proximamente(4, "Qué me falta")
+    : st.tab === "falta" ? vistaFalta()
     : vistaAjustes();
   document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === st.tab));
 }

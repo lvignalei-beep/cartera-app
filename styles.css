@@ -84,3 +84,11 @@ label { display: block; font-size: 13px; color: var(--mut); margin: 10px 0 4px; 
 .mv { display: flex; justify-content: space-between; padding: 6px 0; border-top: 1px solid var(--line); }
 .ap { display: flex; justify-content: space-between; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
 .ap .num { white-space: nowrap; }
+
+.fx { padding: 12px 0; border-top: 1px solid var(--line); }
+.fx-h { display: flex; justify-content: space-between; gap: 8px; }
+.fx-bar { position: relative; height: 10px; background: var(--line); border-radius: 5px; margin: 8px 0 6px; }
+.fx-bar i { display: block; height: 100%; border-radius: 5px; background: var(--acc); }
+.fx-bar b { position: absolute; top: -4px; width: 3px; height: 18px; margin-left: -1px; background: var(--tx); border-radius: 2px; }
+.fx-a { font-size: 13.5px; margin-top: 6px; }
+.fx-v { font-size: 13px; margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 14%, transparent); }
