@@ -8,7 +8,7 @@ const LS = {
 };
 const cfg = () => ({ token: LS.get("token", ""), repo: LS.get("repo", "lvignalei-beep/cartera-datos") });
 
-const st = { data: null, origen: null, error: null, tab: "cartera", agrupar: LS.get("agrupar", "funcion") };
+const st = { data: null, origen: null, error: null, tab: "hoy", periodo: "dia", aporte: LS.get("aporte", 0), agrupar: LS.get("agrupar", "funcion") };
 
 // ---------- formato ----------
 const nf = (d) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: d, minimumFractionDigits: d });
@@ -52,7 +52,73 @@ async function cargar() {
 }
 
 // ---------- señales (las reglas llegan en la etapa 5) ----------
-function senal(p) { return { clave: "neutral", nombre: "Neutral", regla: "Reglas de señales: próximamente" }; }
+const SENAL = { revisar_tesis: "Revisar tesis", tomar_ganancia: "Tomar ganancia parcial", cara: "Cara", esperar: "Esperar",
+  a_mirar: "A mirar / compra escalonada", barata: "Barata vs sector", neutral: "Neutral" };
+function senal(p) { return p.senal || { clave: "neutral", nombre: "Neutral", regla: "sin dato" }; }
+
+// Reparto del aporte: igual que collector/calc.py (reparto_aporte)
+function reparto(pesos, objetivo, aporte) {
+  const fs = Object.keys(objetivo);
+  const total = fs.reduce((s, f) => s + (pesos[f] || 0), 0);
+  const falta = Object.fromEntries(fs.map((f) => [f, Math.max(0, (total + aporte) * objetivo[f] / 100 - (pesos[f] || 0))]));
+  const sf = Object.values(falta).reduce((a, b) => a + b, 0);
+  if (aporte <= 0 || sf === 0) return Object.fromEntries(fs.map((f) => [f, 0]));
+  return Object.fromEntries(fs.map((f) => [f, aporte * falta[f] / sf]));
+}
+
+function vistaHoy() {
+  const d = st.data;
+  if (!d) return vistaCartera();
+  const leyenda = d.reglas?.leyenda || "Filtro numérico, no es recomendación de inversión";
+  const prio = d.reglas?.prioridad || Object.keys(SENAL);
+  const vistos = new Set();
+  const conSenal = d.posiciones.filter((p) => p.senal && p.senal.clave !== "neutral" && !vistos.has(p.ticker) && vistos.add(p.ticker));
+  const porClave = {};
+  conSenal.forEach((p) => (porClave[p.senal.clave] ||= []).push(p));
+  const cuenta = {}; d.posiciones.forEach((p) => { if (p.ind?.fecha) cuenta[p.ind.fecha] = (cuenta[p.ind.fecha] || 0) + 1; });
+  const fechaInd = Object.entries(cuenta).sort((a, b) => b[1] - a[1])[0]?.[0];
+
+  const senales = prio.filter((k) => porClave[k]).map((k) => `
+    <div class="sen" style="--c:var(--s-${k})">
+      <div class="sen-h"><i></i>${esc(SENAL[k])} <span class="mut">(${porClave[k].length})</span></div>
+      ${porClave[k].map((p) => `<div class="sen-i"><b>${esc(p.ticker)}</b> <span class="mut">${esc(p.clasif?.emisor || "")}</span>
+        ${p.senal.todas.map((t) => `<div class="nota">${t.clave !== k ? esc(t.nombre) + ": " : ""}${esc(t.regla)}</div>`).join("")}</div>`).join("")}
+    </div>`).join("") || `<p class="mut">Hoy ninguna regla se dispara en tus posiciones. Eso también es información: no hay nada que hacer fuera de tu aporte normal.</p>`;
+
+  const P = { dia: ["dia", "Día"], semana: ["semana", "Semana"], mes: ["mes", "Mes"], tres_meses: ["tres_meses", "3 meses"] };
+  const mv = d.movimientos?.[st.periodo] || { suben: [], bajan: [] };
+  const fila = (x) => `<div class="mv"><b>${esc(x.ticker)}</b><span class="num ${cls(x.var)}">${pct(x.var)}</span></div>`;
+  const movs = `
+    <div class="seg">${Object.entries(P).map(([k, [, l]]) => `<button data-periodo="${k}" class="${st.periodo === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    <div class="dos"><div><div class="nota">Más subieron</div>${mv.suben.map(fila).join("") || '<p class="nota">ninguna</p>'}</div>
+    <div><div class="nota">Más bajaron</div>${mv.bajan.map(fila).join("") || '<p class="nota">ninguna</p>'}</div></div>
+    <p class="nota">En dólares. Cedears: precio del activo en EE.UU. Resto: precio local ÷ MEP. Bonos, ONs y FCI van a tener variaciones a medida que se junte historia diaria.</p>`;
+
+  const pesos = {};
+  d.posiciones.forEach((p) => { if (p.v_actual != null) pesos[p.funcion] = (pesos[p.funcion] || 0) + p.v_actual; });
+  const rep = reparto(pesos, d.objetivo, st.aporte || 0);
+  const nombres = d.funciones || {};
+  const filasAporte = Object.entries(rep).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).map(([f, v]) => {
+    const cands = (d.candidatos_aporte?.[f] || []);
+    const verdes = cands.filter((c) => c.senal === "a_mirar" || c.senal === "barata");
+    const txt = !cands.length ? "No tenés instrumentos de esta función: hay que elegir uno."
+      : verdes.length ? "Prioridad: " + verdes.map((c) => `<b>${esc(c.ticker)}</b> (${esc(SENAL[c.senal])})`).join(", ") + (cands.length > verdes.length ? ` · o ${cands.filter((c) => !verdes.includes(c)).slice(0, 3).map((c) => esc(c.ticker)).join(", ")}` : "")
+      : "Sin señal verde. Opciones neutrales: " + cands.slice(0, 4).map((c) => esc(c.ticker)).join(", ");
+    return `<div class="ap"><div><b>${esc(nombres[f] || f)}</b><div class="nota">${txt}</div></div><b class="num">${ars(v)}</b></div>`;
+  }).join("");
+  const sumaObj = Object.values(d.objetivo).reduce((a, b) => a + b, 0);
+
+  return `
+  <section class="card"><h2 class="h">Señales en tus posiciones</h2>
+    <p class="nota">Datos al cierre del ${fechaCorta(fechaInd)}. ${esc(leyenda)}.</p>${senales}</section>
+  <section class="card"><h2 class="h">Qué se movió</h2>${movs}</section>
+  <section class="card"><h2 class="h">Con tu próximo aporte</h2>
+    <label for="in-aporte">Monto en pesos</label>
+    <input id="in-aporte" inputmode="numeric" placeholder="4.000.000" value="${st.aporte ? nf(0).format(st.aporte) : ""}">
+    <div id="aporte-out">${st.aporte ? filasAporte : '<p class="nota">Escribí un monto y te muestro cómo repartirlo.</p>'}</div>
+    <p class="nota">Va primero a lo que está más lejos de tu objetivo y nada a lo que ya sobra. Dentro de cada función prioriza lo que tiene señal verde.${sumaObj !== 100 ? ` Ojo: tu objetivo suma ${sumaObj}%, no 100%.` : ""}</p>
+  </section>`;
+}
 
 // ---------- vistas ----------
 function renderEstado() {
@@ -135,7 +201,7 @@ function vistaCartera() {
         <span class="r num">${arsM(v)} <span class="mut" style="font-weight:400">${pct(v / T.ars * 100, 1, false)}</span></span></summary>
       ${ps.map(item).join("")}
     </details>`).join("")}
-  <p class="nota">Ganancia por posición: en dólares reales, con cada compra pasada al MEP de su fecha. Precios: ${esc(d.fuentes?.precios || "")}. La línea de color de cada posición va a mostrar su señal (etapa 5).</p>`;
+  <p class="nota">Ganancia por posición: en dólares reales, con cada compra pasada al MEP de su fecha. Precios: ${esc(d.fuentes?.precios || "")}. La línea de color es la señal de cada posición (detalle en la pestaña Hoy).</p>`;
 
   return hero + al + energia + posiciones;
 }
@@ -173,10 +239,10 @@ function vistaAjustes() {
 function render() {
   renderEstado();
   const v = document.getElementById("vista");
-  v.innerHTML = st.tab === "cartera" ? vistaCartera()
+  v.innerHTML = st.tab === "hoy" ? vistaHoy()
+    : st.tab === "cartera" ? vistaCartera()
     : st.tab === "grafico" ? proximamente(3, "Gráfico por instrumento")
     : st.tab === "falta" ? proximamente(4, "Qué me falta")
-    : st.tab === "radar" ? proximamente(5, "Radar de oportunidades y señales")
     : vistaAjustes();
   document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === st.tab));
 }
@@ -186,6 +252,7 @@ document.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   if (b.dataset.tab) { st.tab = b.dataset.tab; render(); window.scrollTo(0, 0); }
+  else if (b.dataset.periodo) { st.periodo = b.dataset.periodo; render(); }
   else if (b.dataset.agrupar) { st.agrupar = b.dataset.agrupar; LS.set("agrupar", st.agrupar); render(); }
   else if (b.id === "btn-guardar") {
     LS.set("token", document.getElementById("in-token").value.trim());
@@ -204,6 +271,12 @@ document.addEventListener("click", async (e) => {
   }
   else if (b.id === "btn-recargar") { document.getElementById("dlg-actualizar").close(); await cargar(); }
   else if (b.id === "btn-cerrar") document.getElementById("dlg-actualizar").close();
+});
+
+document.addEventListener("change", (e) => {
+  if (e.target.id === "in-aporte") {
+    st.aporte = Number(e.target.value.replace(/[^0-9]/g, "")) || 0; LS.set("aporte", st.aporte); render();
+  }
 });
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});

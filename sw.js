@@ -1,5 +1,5 @@
 // Cachea la "cáscara" de la app para abrirla sin conexión. Los datos se guardan aparte (localStorage).
-const VERSION = "v2-1";
+const VERSION = "v3-1";
 const ARCHIVOS = ["./", "index.html", "styles.css", "app.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
