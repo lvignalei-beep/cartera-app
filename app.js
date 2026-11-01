@@ -153,7 +153,6 @@ function renderEstado() {
   el.innerHTML = `
     <span class="dot ${viejo ? "viejo" : "ok"}">Datos ${esc(cuando(d.corrida.fecha))}${viejo ? " · sin actualizar hace " + diasDesde(d.corrida.fecha) + " días" : ""}</span>
     <span>Balanz: ${ultBol ? "último boleto " + fechaCorta(ultBol) : "por historial"}</span>
-    <span>PPI: foto fija</span>
     ${st.error && st.error !== "falta_token" ? `<span class="neg">${esc(st.error)}</span>` : ""}`;
 }
 
