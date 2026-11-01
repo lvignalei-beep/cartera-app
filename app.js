@@ -108,7 +108,30 @@ function vistaHoy() {
   }).join("");
   const sumaObj = Object.values(d.objetivo).reduce((a, b) => a + b, 0);
 
-  return `
+  // --- con cuánto partí y cuánto tengo (mismas posiciones en las dos puntas) ---
+  const comp = d.posiciones.filter((p) => p.real_usd && p.v_actual != null && p.v_inicial != null);
+  const puseUsd = comp.reduce((s, p) => s + p.real_usd.costo_usd - p.real_usd.ventas_usd, 0);
+  const tengoUsd = comp.reduce((s, p) => s + p.real_usd.valor_usd, 0);
+  const puseArs = comp.reduce((s, p) => s + p.v_inicial, 0);
+  const tengoArs = comp.reduce((s, p) => s + p.v_actual, 0);
+  const desde = d.operaciones.map((o) => o.fecha).filter(Boolean).sort()[0];
+  const excl = d.posiciones.filter((p) => !comp.includes(p)).map((p) => p.ticker);
+  const meses = desde ? Math.max(1, Math.round((Date.parse(d.corrida.id) - Date.parse(desde)) / (30.44 * 864e5))) : null;
+  const balance = `
+  <section class="card hero">
+    <div class="mut">Desde que empezaste (${fechaCorta(desde)}/${desde?.slice(0, 4)}${meses ? `, hace ${meses} meses` : ""})</div>
+    <div class="dos" style="margin-top:8px">
+      <div><div class="nota">Pusiste</div><div class="v num" style="font-size:20px;font-weight:700">${usd(puseUsd)}</div><div class="nota num">${ars(puseArs)}</div></div>
+      <div><div class="nota">Hoy tenés</div><div class="v num" style="font-size:20px;font-weight:700">${usd(tengoUsd)}</div><div class="nota num">${ars(tengoArs)}</div></div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Ganaste en dólares</div><div class="v num ${cls(tengoUsd - puseUsd)}">${usd(tengoUsd - puseUsd)}</div><div class="s">${pct((tengoUsd / puseUsd - 1) * 100)}</div></div>
+      <div class="kpi"><div class="l">Ganaste en pesos</div><div class="v num ${cls(tengoArs - puseArs)}">${ars(tengoArs - puseArs)}</div><div class="s">${pct((tengoArs / puseArs - 1) * 100)}</div></div>
+    </div>
+    <p class="nota">"Pusiste" en dólares = cada compra pasada al MEP del día en que la hiciste (lo que realmente te costó en dólares). En pesos la ganancia se ve más grande porque incluye la suba del dólar.${excl.length ? ` No incluye ${excl.map(esc).join(", ")} (sin precio o sin historial).` : ""}</p>
+  </section>`;
+
+  return balance + `
   <section class="card"><h2 class="h">Señales en tus posiciones</h2>
     <p class="nota">Datos al cierre del ${fechaCorta(fechaInd)}. ${esc(leyenda)}.</p>${senales}</section>
   <section class="card"><h2 class="h">Qué se movió</h2>${movs}</section>
