@@ -195,7 +195,7 @@ function vistaFalta() {
       <div class="fx-bar" aria-hidden="true"><i style="width:${x.tp / escala * 100}%"></i><b style="left:${x.obj / escala * 100}%"></b></div>
       <div class="fx-n nota num">Tenés ${pct(x.tp, 1, false)} (${arsM(x.tengo)}) · objetivo ${x.obj}% ·
         ${x.fs >= 0 ? `<span class="pos">falta ${arsM(x.fs)}</span>` : `<span class="neg">sobra ${arsM(-x.fs)}</span>`}</div>
-      ${x.ap > 0 ? `<div class="fx-a">Del aporte: <b class="num">${ars(x.ap)}</b>${cands.length ? " → " + cands.slice(0, 3).map((c) => `${esc(c.ticker)}${c.senal !== "neutral" ? " (" + esc(SENAL[c.senal]) + ")" : ""}`).join(", ") : " → no tenés instrumentos de esta función: hay que elegir uno"}</div>` : ""}
+      ${x.ap > 0 ? `<div class="fx-a">Del aporte: <b class="num">${ars(x.ap)}</b>${cands.length ? " → " + cands.slice(0, 3).map((c) => `${esc(c.ticker)}${c.momento === "oportunidad" ? " 💡" : ""}`).join(", ") : " → no tenés instrumentos de esta función que no estén caros: hay que elegir uno"}</div>` : ""}
       ${vender ? `<div class="fx-v">Supera el objetivo por más de ${umbral} puntos: evaluar una venta parcial de ~${arsM(-x.fs)} o, más simple, dejar de aportarle hasta que el resto crezca.</div>` : ""}
     </div>`;
   };
@@ -206,7 +206,7 @@ function vistaFalta() {
     <p class="nota">Barra = lo que tenés · marca = objetivo. Ordenado de lo que más falta a lo que más sobra. Sin liquidez: tu reserva está en la caja de ahorro.</p>
     ${sumaObj !== 100 ? `<p class="fx-v">Tu objetivo suma ${sumaObj}%, no 100%: los "falta/sobra" no cierran a cero. Definí a qué función van los ${100 - sumaObj} puntos que faltan (archivo config/objetivo.json, o pedímelo).</p>` : ""}
     <label for="in-aporte">Próximo aporte en pesos</label>
-    <input id="in-aporte" inputmode="numeric" placeholder="4.000.000" value="${st.aporte ? nf(0).format(st.aporte) : ""}">
+    <div class="inrow"><input id="in-aporte" inputmode="numeric" enterkeyhint="done" placeholder="Ej.: 4.000.000" value="${st.aporte ? nf(0).format(st.aporte) : ""}"><button id="btn-aporte">Calcular</button></div>
     ${filas.map(fila).join("")}
     <p class="nota">Cálculo: falta/sobra = total × objetivo − lo que tenés. Aporte: a cada función le toca aporte × (lo que le falta después de sumar el aporte) ÷ (suma de faltantes); lo que sobra no recibe nada. Total considerado: ${ars(total)}${(d.totales.posiciones_sin_valor || []).length ? " (sin " + d.totales.posiciones_sin_valor.map(esc).join(", ") + ")" : ""}.</p>
   </section>`;
@@ -246,10 +246,11 @@ function vistaHoy() {
   const nombres = d.funciones || {};
   const filasAporte = Object.entries(rep).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).map(([f, v]) => {
     const cands = (d.candidatos_aporte?.[f] || []);
-    const verdes = cands.filter((c) => c.senal === "a_mirar" || c.senal === "barata");
-    const txt = !cands.length ? "No tenés instrumentos de esta función: hay que elegir uno."
-      : verdes.length ? "Prioridad: " + verdes.map((c) => `<b>${esc(c.ticker)}</b> (${esc(SENAL[c.senal])})`).join(", ") + (cands.length > verdes.length ? ` · o ${cands.filter((c) => !verdes.includes(c)).slice(0, 3).map((c) => esc(c.ticker)).join(", ")}` : "")
-      : "Sin señal verde. Opciones neutrales: " + cands.slice(0, 4).map((c) => esc(c.ticker)).join(", ");
+    const verdes = cands.filter((c) => c.momento === "oportunidad");
+    const resto = cands.filter((c) => c.momento !== "oportunidad");
+    const txt = !cands.length ? (!(pesos[f] > 0) ? "Todavía no tenés nada acá: hay que elegir un instrumento." : "Todo lo que tenés acá está caro hoy: conviene esperar o elegir otro instrumento.")
+      : verdes.length ? "💡 " + verdes.map((c) => `<b>${esc(c.ticker)}</b>`).join(", ") + " (buen momento)" + (resto.length ? ` · o ${resto.slice(0, 3).map((c) => esc(c.ticker)).join(", ")}` : "")
+      : "Sin oportunidad clara. Opciones a precio normal: " + resto.slice(0, 4).map((c) => esc(c.ticker)).join(", ");
     return `<div class="ap"><div><b>${esc(nombres[f] || f)}</b><div class="nota">${txt}</div></div><b class="num">${ars(v)}</b></div>`;
   }).join("");
   const sumaObj = Math.round(Object.values(d.objetivo).reduce((a, b) => a + b, 0) * 10) / 10;
@@ -304,9 +305,9 @@ function vistaHoy() {
   <section class="card"><h2 class="h">Qué se movió</h2>${movs}</section>
   <section class="card"><h2 class="h">Con tu próximo aporte</h2>
     <label for="in-aporte">Monto en pesos</label>
-    <input id="in-aporte" inputmode="numeric" placeholder="4.000.000" value="${st.aporte ? nf(0).format(st.aporte) : ""}">
+    <div class="inrow"><input id="in-aporte" inputmode="numeric" enterkeyhint="done" placeholder="Ej.: 4.000.000" value="${st.aporte ? nf(0).format(st.aporte) : ""}"><button id="btn-aporte">Calcular</button></div>
     <div id="aporte-out">${st.aporte ? filasAporte : '<p class="nota">Escribí un monto y te muestro cómo repartirlo.</p>'}</div>
-    <p class="nota">Va primero a lo que está más lejos de tu objetivo y nada a lo que ya sobra. Dentro de cada función prioriza lo que tiene señal verde.${sumaObj !== 100 ? ` Ojo: tu objetivo suma ${sumaObj}%, no 100%.` : ""}</p>
+    <p class="nota">Va primero a lo que está más lejos de tu objetivo y nada a lo que ya sobra. Dentro de cada función prioriza lo que está en buen momento de precio y saca lo que está caro.${sumaObj !== 100 ? ` Ojo: tu objetivo suma ${sumaObj}%, no 100%.` : ""}</p>
   </section>`;
 }
 
@@ -437,6 +438,7 @@ document.addEventListener("click", async (e) => {
   if (!b) return;
   if (b.dataset.tab) { st.tab = b.dataset.tab; render(); window.scrollTo(0, 0); }
   else if (b.dataset.ver) { st.ticker = b.dataset.ver; LS.set("ticker", st.ticker); st.tab = "grafico"; render(); window.scrollTo(0, 0); }
+  else if (b.id === "btn-aporte") { leerAporte(); }
   else if (b.dataset.periodo) { st.periodo = b.dataset.periodo; render(); }
   else if (b.dataset.agrupar) { st.agrupar = b.dataset.agrupar; LS.set("agrupar", st.agrupar); render(); }
   else if (b.id === "btn-guardar") {
@@ -461,13 +463,22 @@ document.addEventListener("click", async (e) => {
   else if (b.id === "btn-cerrar") document.getElementById("dlg-actualizar").close();
 });
 
+function leerAporte() {
+  const el = document.getElementById("in-aporte");
+  if (!el) return;
+  st.aporte = Number(el.value.replace(/[^0-9]/g, "")) || 0; LS.set("aporte", st.aporte);
+  const y = window.scrollY; render(); window.scrollTo(0, y);
+}
+document.addEventListener("keydown", (e) => { if (e.target.id === "in-aporte" && e.key === "Enter") { e.preventDefault(); e.target.blur(); leerAporte(); } });
 document.addEventListener("change", (e) => {
   if (e.target.id === "sel-ticker") { st.ticker = e.target.value; LS.set("ticker", st.ticker); render(); return; }
-  if (e.target.id === "in-aporte") {
-    st.aporte = Number(e.target.value.replace(/[^0-9]/g, "")) || 0; LS.set("aporte", st.aporte); render();
-  }
+  if (e.target.id === "in-aporte") leerAporte();
 });
 
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((r) => r.update()).catch(() => {});
+  let recargado = false; // cuando se instala una versión nueva, recarga una sola vez para usarla
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (!recargado) { recargado = true; location.reload(); } });
+}
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") cargar(); });
 cargar();

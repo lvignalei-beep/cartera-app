@@ -102,3 +102,7 @@ select { font: inherit; color: var(--tx); background: var(--card); border: 1px s
 .graf { position: relative; height: 260px; margin-top: 8px; }
 .kv { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 14px; }
 .kv b { text-align: right; }
+
+.inrow { display: flex; gap: 8px; }
+.inrow input { flex: 1; min-width: 0; }
+.inrow button { flex: none; }
