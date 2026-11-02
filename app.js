@@ -7,7 +7,7 @@ const LS = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* sin storage: sigue en memoria */ } },
 };
 
-const st = { data: null, origen: null, error: null, tab: "hoy", periodo: "dia", aporte: LS.get("aporte", 0), agrupar: LS.get("agrupar", "funcion") };
+const st = { data: null, origen: null, error: null, tab: "hoy", periodo: "dia", ticker: LS.get("ticker", null), aporte: LS.get("aporte", 0), agrupar: LS.get("agrupar", "funcion") };
 
 // ---------- formato ----------
 const nf = (d) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: d, minimumFractionDigits: d });
@@ -88,6 +88,88 @@ function reparto(pesos, objetivo, aporte) {
   return Object.fromEntries(fs.map((f) => [f, aporte * falta[f] / sf]));
 }
 
+let chart = null;
+function vistaGrafico() {
+  const d = st.data;
+  if (!d) return vistaCartera();
+  const tks = [...new Set(d.posiciones.map((p) => p.ticker))].sort();
+  const t = tks.includes(st.ticker) ? st.ticker : tks[0];
+  const p = d.posiciones.find((x) => x.ticker === t);
+  const g = d.graficos?.[t];
+  const i = p.ind || {};
+  const f = p.fund;
+  const sel = `<select id="sel-ticker">${tks.map((x) => `<option ${x === t ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>`;
+  const dg = p.diag || {};
+  const MOM = { oportunidad: ["💡 Buen momento de precio", "pos"], caro: ["⏸️ Caro para sumar ahora", "neg"], mixto: ["↔️ Señales mixtas", "mut"], normal: ["Precio normal", "mut"], sin_dato: ["Momento: sin datos suficientes", "mut"] };
+  const RES = { bien: ["✅ Te está yendo bien", "pos"], mal: ["⚠️ Te está yendo mal", "neg"], neutro: ["Resultado parejo", "mut"], sin_dato: ["Resultado: sin dato", "mut"] };
+  const n = (x, dd = 1) => x == null ? "sin dato" : nf(dd).format(x);
+  const fila = (l, v) => `<div class="kv"><span>${l}</span><b class="num">${v}</b></div>`;
+  const pocos = !g || (g.velas || []).length < 5;
+  return `
+  <section class="card">${sel}
+    <div class="dos" style="margin-top:10px">
+      <div><div class="${RES[dg.resultado]?.[1]}">${RES[dg.resultado]?.[0] || ""}</div><div class="nota">${pct(p.real_usd?.ganancia_pct)} en USD · ${ars(p.ganancia_ars)}</div></div>
+      <div><div class="${MOM[dg.momento]?.[1]}">${MOM[dg.momento]?.[0] || ""}</div><div class="nota">Señal: ${esc(p.senal?.nombre || "")}</div></div>
+    </div>
+    ${(dg.a_favor || []).map((x) => `<div class="nota pos">+ ${esc(x)}</div>`).join("")}${(dg.en_contra || []).map((x) => `<div class="nota neg">− ${esc(x)}</div>`).join("")}
+  </section>
+  <section class="card">
+    <b>${esc(g?.titulo || t)}</b>
+    ${pocos ? `<p class="vacio">Todavía no hay historia de precios suficiente para graficar ${esc(t)}. Se junta un punto por día hábil desde el 01/11.</p>` : `<div class="graf"><canvas id="cv"></canvas></div>
+    <p class="nota">▲ compras · línea punteada: ${esc(g.ppc_nota)} · verde/rojo: desde tu primera compra, arriba o abajo de esa línea · gris: media de 200 ruedas. Fuente: ${esc(g.fuente)}.</p>`}
+  </section>
+  <section class="card">
+    ${fila("Variación hoy / mes / 3 meses", `${pct(i.d1)} · ${pct(i.m1)} · ${pct(i.m3)}`)}
+    ${fila("En el año / 12 meses", `${pct(i.ytd)} · ${pct(i.m12)}`)}
+    ${fila("RSI (14)", n(i.rsi14, 0) + (i.rsi14 > 70 ? " · subió rápido" : i.rsi14 < 30 ? " · muy castigado" : ""))}
+    ${fila("vs. media de 200 ruedas", pct(i.dist_ma200))}
+    ${fila("vs. máximo de 52 semanas", pct(i.dist_max52))}
+    ${f ? fila("P/E (veces sus ganancias)", `${n(f.pe)} · sector ${n(f.pe_sector)}${f.pe && f.pe_sector ? " (" + nf(2).format(f.pe / f.pe_sector) + "×)" : ""}`) : fila("P/E", "no aplica (ETF, bono o fondo)")}
+    <p class="nota">Variaciones en dólares. ${esc(i.fuente || "")}.</p>
+  </section>
+  <section class="card"><b>Tus operaciones</b>
+    ${(g?.compras || []).map((c) => `<div class="kv"><span>${fechaCorta(c.fecha)}/${c.fecha.slice(2, 4)} · ${c.tipo} ${nf(c.cantidad % 1 ? 2 : 0).format(c.cantidad)}</span><b class="num">${c.precio_pagado == null ? "sin dato" : (c.moneda_pagada === "USD" ? "US$ " : "$ ") + nf(c.precio_pagado < 100 ? 2 : 0).format(c.precio_pagado)}</b></div>`).join("") || '<p class="nota">Sin operaciones registradas.</p>'}
+  </section>`;
+}
+
+function dibujarGrafico() {
+  const cv = document.getElementById("cv");
+  if (chart) { chart.destroy(); chart = null; }
+  if (!cv || typeof Chart === "undefined") return;
+  const d = st.data;
+  const tks = [...new Set(d.posiciones.map((p) => p.ticker))].sort();
+  const t = tks.includes(st.ticker) ? st.ticker : tks[0];
+  const g = d.graficos[t];
+  const labels = g.velas.map((v) => v[0]);
+  const precios = g.velas.map((v) => v[1]);
+  const ma = precios.map((_, k) => k >= 199 ? precios.slice(k - 199, k + 1).reduce((a, b) => a + b, 0) / 200 : null);
+  const marcas = labels.map(() => null);
+  const info = labels.map(() => null);
+  g.compras.forEach((c) => {
+    let k = labels.findIndex((l) => l >= c.fecha); if (k < 0) k = labels.length - 1;
+    if (c.y != null) { marcas[k] = c.y; info[k] = c; }
+  });
+  const css = getComputedStyle(document.documentElement);
+  const col = (v) => css.getPropertyValue(v).trim();
+  const primera = g.compras.filter((c) => c.tipo === "compra").map((c) => c.fecha).sort()[0];
+  const desde = precios.map((v, k) => (primera && labels[k] >= primera ? v : null));
+  const ds = [{ label: "Precio", data: precios, borderColor: col("--tx"), borderWidth: 1.5, pointRadius: 0, tension: 0.1 },
+    { label: "desde", data: desde, borderWidth: 0, pointRadius: 0, tension: 0.1,
+      fill: g.ppc ? { target: { value: g.ppc }, above: "rgba(22,163,74,.18)", below: "rgba(220,38,38,.18)" } : false },
+    { label: "Media 200", data: ma, borderColor: col("--mut"), borderWidth: 1, pointRadius: 0, borderDash: [2, 3] },
+    { label: "Compras", data: marcas, showLine: false, pointStyle: "triangle", pointRadius: 7, pointBackgroundColor: col("--acc"), pointBorderColor: col("--card") }];
+  if (g.ppc) ds.push({ label: "Tu promedio", data: labels.map(() => g.ppc), borderColor: col("--acc"), borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0 });
+  const mon = g.moneda === "USD" ? "US$ " : "$ ";
+  chart = new Chart(cv, { type: "line", data: { labels, datasets: ds },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: {
+        title: (it) => it[0].label.split("-").reverse().join("/"),
+        label: (it) => { if (it.dataset.label === "Compras") { const c = info[it.dataIndex]; return c ? `${c.tipo} ${c.cantidad} · pagaste ${c.moneda_pagada === "USD" ? "US$ " : "$ "}${nf(2).format(c.precio_pagado)}` : null; }
+          return it.raw == null || it.dataset.label === "desde" ? null : `${it.dataset.label}: ${mon}${nf(2).format(it.raw)}`; } } } },
+      scales: { x: { ticks: { maxTicksLimit: 5, color: col("--mut"), callback: function (v) { const l = this.getLabelForValue(v); return l.slice(5, 7) + "/" + l.slice(2, 4); } }, grid: { display: false } },
+        y: { ticks: { color: col("--mut"), maxTicksLimit: 5 }, grid: { color: col("--line") } } } } });
+}
+
 function vistaFalta() {
   const d = st.data;
   if (!d) return vistaCartera();
@@ -96,7 +178,7 @@ function vistaFalta() {
   const pesos = {};
   d.posiciones.forEach((p) => { if (p.v_actual != null) pesos[p.funcion] = (pesos[p.funcion] || 0) + p.v_actual; });
   const total = Object.values(pesos).reduce((a, b) => a + b, 0);
-  const sumaObj = Object.values(d.objetivo).reduce((a, b) => a + b, 0);
+  const sumaObj = Math.round(Object.values(d.objetivo).reduce((a, b) => a + b, 0) * 10) / 10;
   const rep = reparto(pesos, d.objetivo, st.aporte || 0);
   const filas = Object.keys(d.objetivo).map((f) => {
     const tengo = pesos[f] || 0, tp = total ? tengo / total * 100 : 0, obj = d.objetivo[f];
@@ -170,7 +252,7 @@ function vistaHoy() {
       : "Sin señal verde. Opciones neutrales: " + cands.slice(0, 4).map((c) => esc(c.ticker)).join(", ");
     return `<div class="ap"><div><b>${esc(nombres[f] || f)}</b><div class="nota">${txt}</div></div><b class="num">${ars(v)}</b></div>`;
   }).join("");
-  const sumaObj = Object.values(d.objetivo).reduce((a, b) => a + b, 0);
+  const sumaObj = Math.round(Object.values(d.objetivo).reduce((a, b) => a + b, 0) * 10) / 10;
 
   // --- con cuánto partí y cuánto tengo (mismas posiciones en las dos puntas) ---
   const comp = d.posiciones.filter((p) => p.real_usd && p.v_actual != null && p.v_inicial != null);
@@ -195,7 +277,28 @@ function vistaHoy() {
     <p class="nota">"Pusiste" en dólares = cada compra pasada al MEP del día en que la hiciste (lo que realmente te costó en dólares). En pesos la ganancia se ve más grande porque incluye la suba del dólar.${excl.length ? ` No incluye ${excl.map(esc).join(", ")} (sin precio o sin historial).` : ""}</p>
   </section>`;
 
-  return balance + `
+  // --- cómo está cada cosa ---
+  const uniq = []; const vis = new Set();
+  d.posiciones.forEach((p) => { if (!vis.has(p.ticker) && p.diag) { vis.add(p.ticker); uniq.push(p); } });
+  const gpct = (p) => p.real_usd?.ganancia_pct;
+  const li = (p, txt, extra = "") => `<button class="li" data-ver="${esc(p.ticker)}"><span><b>${esc(p.ticker)}</b> <span class="mut">${esc(p.clasif?.emisor || "")}</span>${extra}<br><span class="nota">${txt}</span></span><span class="chev">›</span></button>`;
+  const oport = uniq.filter((p) => p.diag.momento === "oportunidad");
+  const caros = uniq.filter((p) => p.diag.momento === "caro");
+  const bien = uniq.filter((p) => p.diag.resultado === "bien").sort((a, b) => gpct(b) - gpct(a));
+  const mal = uniq.filter((p) => p.diag.resultado === "mal").sort((a, b) => gpct(a) - gpct(b));
+  const bloque = (titulo, icono, color, items, render) => items.length ? `
+    <div class="bl" style="--c:${color}"><div class="bl-h">${icono} ${titulo} <span class="mut">(${items.length})</span></div>${items.map(render).join("")}</div>` : "";
+  const lectura = `
+  <section class="card"><h2 class="h">Cómo está cada cosa</h2>
+    <p class="nota">Tocá cualquiera para ver su gráfico. ${esc(d.reglas?.leyenda || "")}.</p>
+    ${bloque("Para sumar: buen momento de precio", "💡", "var(--s-a_mirar)", oport, (p) => li(p, esc(p.diag.a_favor.join(" · "))))}
+    ${bloque("Caro para sumar ahora", "⏸️", "var(--s-esperar)", caros, (p) => li(p, esc(p.diag.en_contra.join(" · "))))}
+    ${bloque("Te está yendo bien", "✅", "var(--pos)", bien, (p) => li(p, `${pct(gpct(p))} en dólares desde que compraste`))}
+    ${bloque("Te está yendo mal", "⚠️", "var(--neg)", mal, (p) => li(p, `${pct(gpct(p))} en dólares desde que compraste${p.diag.momento === "oportunidad" ? " · pero hoy es buen momento de precio" : ""}`))}
+    <p class="nota">Bien/mal: ganancia real en USD de ±${d.reglas?.diagnostico?.va_bien_min ?? 5}% o más. Buen momento: señal verde, o RSI bajo ${d.reglas?.diagnostico?.rsi_bajo ?? 35} con precio bajo su media de 200 ruedas, o P/E ≤ ${String(d.reglas?.diagnostico?.pe_barato_vs_sector ?? 0.75).replace(".", ",")}× su sector. Caro: RSI arriba de ${d.reglas?.diagnostico?.rsi_alto ?? 70}, más de ${d.reglas?.diagnostico?.lejos_media_max ?? 15}% sobre su media, o señal Esperar/Cara/Tomar ganancia. ONs, bonos y FCI se suman cuando junten historia.</p>
+  </section>`;
+
+  return balance + lectura + `
   <section class="card"><h2 class="h">Señales en tus posiciones</h2>
     <p class="nota">Datos al cierre del ${fechaCorta(fechaInd)}. ${esc(leyenda)}.</p>${senales}</section>
   <section class="card"><h2 class="h">Qué se movió</h2>${movs}</section>
@@ -239,6 +342,8 @@ function vistaCartera() {
         <div class="s">${pct(T.ganancia_real_pct)} · cada compra al MEP de su día · cubre ${nf(0).format(T.cobertura_ganancia_real_pct)}%</div></div>
     </div>
     ${sinValor.length ? `<p class="nota">Sin valor de mercado (no suman al total): ${sinValor.map(esc).join(", ")}.</p>` : ""}
+    ${d.liquidez ? `<p class="nota">Más ${ars(d.liquidez.total_ars)} sin invertir en Balanz → <b>${ars(T.ars + d.liquidez.total_ars)}</b>. Balanz mostraba ${ars(d.liquidez.total_balanz_ars)} el ${fechaCorta(d.liquidez.fecha)}: la diferencia chica es porque acá se valúa con precios de cierre y el MEP de ArgentinaDatos.</p>` : ""}
+    ${d.posiciones.filter((p) => (p.precio_fuente || "").startsWith("observado")).map((p) => `<p class="nota">${esc(p.ticker)}: ${esc(p.precio_fuente)}.</p>`).join("")}
   </section>`;
 
   const ener = d.posiciones.filter((p) => p.clasif?.energia_arg && p.v_actual);
@@ -267,7 +372,7 @@ function vistaCartera() {
     const s = senal(p);
     const g = p.real_usd;
     const prec = p.precio == null ? "precio sin dato" : `${p.precio_unidad === "por_100" ? "c/100 VN " : p.precio_unidad === "vcp_1000" ? "c/1000 cp " : ""}${p.precio_moneda === "USD" ? "US$ " : "$ "}${nf(p.precio < 100 ? 2 : 0).format(p.precio)}`;
-    return `<div class="pos-item">
+    return `<div class="pos-item" data-ver-item="${esc(p.ticker)}">
       <span class="sig" style="background:var(--s-${s.clave})" title="${esc(s.nombre + " · " + s.regla)}"></span>
       <div style="min-width:0">
         <div class="t">${esc(p.ticker)}${p.broker !== "balanz" ? `<span class="tag">${esc(p.broker.toUpperCase())}</span>` : ""}${p.clasif?.energia_arg ? '<span class="tag en">energía AR</span>' : ""}</div>
@@ -317,17 +422,21 @@ function render() {
   const v = document.getElementById("vista");
   v.innerHTML = st.tab === "hoy" ? vistaHoy()
     : st.tab === "cartera" ? vistaCartera()
-    : st.tab === "grafico" ? proximamente(3, "Gráfico por instrumento")
+    : st.tab === "grafico" ? vistaGrafico()
     : st.tab === "falta" ? vistaFalta()
     : vistaAjustes();
   document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === st.tab));
+  if (st.tab === "grafico") dibujarGrafico();
 }
 
 // ---------- eventos ----------
 document.addEventListener("click", async (e) => {
+  const it = e.target.closest("[data-ver-item]");
+  if (it) { st.ticker = it.dataset.verItem; LS.set("ticker", st.ticker); st.tab = "grafico"; render(); window.scrollTo(0, 0); return; }
   const b = e.target.closest("button");
   if (!b) return;
   if (b.dataset.tab) { st.tab = b.dataset.tab; render(); window.scrollTo(0, 0); }
+  else if (b.dataset.ver) { st.ticker = b.dataset.ver; LS.set("ticker", st.ticker); st.tab = "grafico"; render(); window.scrollTo(0, 0); }
   else if (b.dataset.periodo) { st.periodo = b.dataset.periodo; render(); }
   else if (b.dataset.agrupar) { st.agrupar = b.dataset.agrupar; LS.set("agrupar", st.agrupar); render(); }
   else if (b.id === "btn-guardar") {
@@ -353,6 +462,7 @@ document.addEventListener("click", async (e) => {
 });
 
 document.addEventListener("change", (e) => {
+  if (e.target.id === "sel-ticker") { st.ticker = e.target.value; LS.set("ticker", st.ticker); render(); return; }
   if (e.target.id === "in-aporte") {
     st.aporte = Number(e.target.value.replace(/[^0-9]/g, "")) || 0; LS.set("aporte", st.aporte); render();
   }

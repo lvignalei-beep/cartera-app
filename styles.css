@@ -92,3 +92,13 @@ label { display: block; font-size: 13px; color: var(--mut); margin: 10px 0 4px; 
 .fx-bar b { position: absolute; top: -4px; width: 3px; height: 18px; margin-left: -1px; background: var(--tx); border-radius: 2px; }
 .fx-a { font-size: 13.5px; margin-top: 6px; }
 .fx-v { font-size: 13px; margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 14%, transparent); }
+
+.bl { margin: 12px 0; border-left: 4px solid var(--c); padding-left: 10px; }
+.bl-h { font-weight: 650; margin-bottom: 4px; }
+button.li { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 8px; text-align: left; background: transparent; color: var(--tx); border-radius: 0; padding: 8px 0; border-top: 1px solid var(--line); }
+.chev { color: var(--mut); font-size: 20px; }
+.pos-item { cursor: pointer; }
+select { font: inherit; color: var(--tx); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; width: 100%; font-weight: 650; }
+.graf { position: relative; height: 260px; margin-top: 8px; }
+.kv { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.kv b { text-align: right; }

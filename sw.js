@@ -1,6 +1,6 @@
 // Cachea la "cáscara" de la app para abrirla sin conexión. Los datos se guardan aparte (localStorage).
-const VERSION = "v5-1";
-const ARCHIVOS = ["./", "index.html", "styles.css", "app.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
+const VERSION = "v6-1";
+const ARCHIVOS = ["./", "index.html", "styles.css", "app.js", "chart.umd.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(ARCHIVOS)).then(() => self.skipWaiting()));
